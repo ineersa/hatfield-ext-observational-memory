@@ -225,11 +225,19 @@ final class OmSessionContextCommandTest extends IsolatedKernelTestCase
                 throw new \RuntimeException('lazy session boom');
             }
 
+            public function setExtensionWarning(string $name, ?string $message): void
+            {
+            }
+
             public function requestRender(bool $force = false): void
             {
             }
 
             public function setStatus(string $key, ?string $text): void
+            {
+            }
+
+            public function setTransientStatus(string $key, string $text): void
             {
             }
 
@@ -273,6 +281,10 @@ final class OmSessionContextCommandTest extends IsolatedKernelTestCase
             {
             }
 
+            public function setExtensionWarning(string $name, ?string $message): void
+            {
+            }
+
             public function getSessionId(): string
             {
                 return $this->sessionId;
@@ -283,6 +295,10 @@ final class OmSessionContextCommandTest extends IsolatedKernelTestCase
             }
 
             public function setStatus(string $key, ?string $text): void
+            {
+            }
+
+            public function setTransientStatus(string $key, string $text): void
             {
             }
 
@@ -365,6 +381,10 @@ final class OmSessionContextCommandTest extends IsolatedKernelTestCase
             }
 
             public function registerAfterTurnCommitHook(AfterTurnCommitHookInterface $hook): void
+            {
+            }
+
+            public function registerSessionStartHook(\Ineersa\Hatfield\ExtensionApi\Lifecycle\AfterSessionStartHookInterface $hook): void
             {
             }
 
