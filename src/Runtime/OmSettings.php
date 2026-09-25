@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace Ineersa\HatfieldExt\ObservationalMemory\Runtime;
 
 use Ineersa\Hatfield\ExtensionApi\ExtensionApiInterface;
+use Ineersa\HatfieldExt\ObservationalMemory\Semantic\SemanticSettings;
 
 /**
  * Nested observational_memory settings.
  *
  * One shared top-level model for Observer, Reflector, and Dropper.
- * No thinking levels; provider defaults apply.
+ * Dropper requests thinkingLevel=off per call; Reflector/Observer keep provider defaults.
  */
 final readonly class OmSettings
 {
@@ -33,6 +34,12 @@ final readonly class OmSettings
     /** Closest Hatfield mapping of Pi agentMaxTurns=16. */
     public const int DEFAULT_AGENT_MAX_TOOL_CALLS = 16;
 
+    /**
+     * Per-HTTP-request max_duration for Reflector and Dropper agent calls only.
+     * Does not change the shared LLM HttpClient default used by the main loop.
+     */
+    public const int AGENT_HTTP_MAX_DURATION_SECONDS = 300;
+
     public function __construct(
         public string $databasePath,
         public ?string $model,
@@ -42,6 +49,7 @@ final readonly class OmSettings
         public int $reflectAfterObservationTokens,
         public string $reflectorSchemaVersion,
         public int $observationsMaxTokens,
+        public ?SemanticSettings $semantic = null,
     ) {
     }
 
@@ -106,6 +114,7 @@ final readonly class OmSettings
             reflectAfterObservationTokens: $reflectAfter,
             reflectorSchemaVersion: $reflectorSchemaVersion,
             observationsMaxTokens: $observationsMaxTokens,
+            semantic: SemanticSettings::fromArray($raw['semantic'] ?? null),
         );
     }
 
@@ -128,6 +137,7 @@ final readonly class OmSettings
             reflectAfterObservationTokens: $this->reflectAfterObservationTokens,
             reflectorSchemaVersion: $this->reflectorSchemaVersion,
             observationsMaxTokens: $this->observationsMaxTokens,
+            semantic: $this->semantic,
         );
     }
 
