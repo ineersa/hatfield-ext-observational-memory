@@ -11,7 +11,6 @@ use Ineersa\HatfieldExt\ObservationalMemory\Observer\OmTokenEstimator;
 use Ineersa\HatfieldExt\ObservationalMemory\Runtime\OmActivityReporter;
 use Ineersa\HatfieldExt\ObservationalMemory\Runtime\OmPaths;
 use Ineersa\HatfieldExt\ObservationalMemory\Runtime\OmSettings;
-use Ineersa\HatfieldExt\ObservationalMemory\Semantic\SemanticIndexJobHandler;
 use Ineersa\HatfieldExt\ObservationalMemory\Storage\MemoryGenerationRepository;
 use Ineersa\HatfieldExt\ObservationalMemory\Storage\ObservationRepository;
 use Ineersa\HatfieldExt\ObservationalMemory\Storage\OmConflictException;
@@ -38,8 +37,12 @@ final readonly class ReflectGenerationJobHandler implements ExtensionAgentJobHan
 
     public function handle(ExtensionApiInterface $api, array $payload, ?string $jobId, ?string $correlationId): void
     {
-        $settings = OmSettings::fromApi($api);
         $runId = (string) ($payload['run_id'] ?? '');
+        // Recheck at execution: old/explicitly queued child jobs must also be inert.
+        if ('' !== $runId && $api->isChildRun($runId)) {
+            return;
+        }
+        $settings = OmSettings::fromApi($api);
         $generationId = (string) ($payload['generation_id'] ?? '');
         $observationSetHash = (string) ($payload['observation_set_hash'] ?? '');
         // Payload field kept as reflector_model for generation identity compatibility.
@@ -112,10 +115,6 @@ final readonly class ReflectGenerationJobHandler implements ExtensionAgentJobHan
                 'generation_id' => $generationId,
                 'claim_status' => $claim['status'],
             ]);
-
-            if ('already_succeeded' === $claim['status']) {
-                SemanticIndexJobHandler::schedule($api, $settings, $runId);
-            }
 
             return;
         }
@@ -306,7 +305,6 @@ final readonly class ReflectGenerationJobHandler implements ExtensionAgentJobHan
                 $activity->clear($runId, $activityJobId);
             }
         }
-        SemanticIndexJobHandler::schedule($api, $settings, $runId);
     }
 
     private function nowUtc(): string

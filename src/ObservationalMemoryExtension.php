@@ -21,8 +21,6 @@ use Ineersa\HatfieldExt\ObservationalMemory\Query\OmSessionContext;
 use Ineersa\HatfieldExt\ObservationalMemory\Runtime\ObservationalMemoryConfiguration;
 use Ineersa\HatfieldExt\ObservationalMemory\Runtime\OmPaths;
 use Ineersa\HatfieldExt\ObservationalMemory\Runtime\OmSettings;
-use Ineersa\HatfieldExt\ObservationalMemory\Semantic\SemanticIndexJobHandler;
-use Ineersa\HatfieldExt\ObservationalMemory\Semantic\SemanticIndexStartupHook;
 use Ineersa\HatfieldExt\ObservationalMemory\Tool\RecallToolHandler;
 use Ineersa\HatfieldExt\ObservationalMemory\Tool\SearchToolHandler;
 use Ineersa\HatfieldExt\ObservationalMemory\Tui\OmBackgroundStatusPoller;
@@ -50,6 +48,8 @@ final class ObservationalMemoryExtension implements ConfigurableExtensionInterfa
 
     private ?string $databasePath = null;
 
+    private ExtensionApiInterface $api;
+
     public function __construct()
     {
         $this->logger = new NullLogger();
@@ -68,15 +68,12 @@ final class ObservationalMemoryExtension implements ConfigurableExtensionInterfa
 
     public function register(ExtensionApiInterface $api): void
     {
-        // Presence on extensions.enabled is the sole enable switch.
+        // Selection enables registration; each runtime entry point enforces main-only OM.
+        $this->api = $api;
         $settings = OmSettings::fromApi($api);
         $this->databasePath = OmPaths::fromSettings($settings, $api->getCwd())->databasePath;
         $query = new OmQueryService($api, $settings, $this->logger);
-        $hybrid = null !== $settings->semantic;
-        if ($hybrid) {
-            $api->registerExtensionAgentJobHandler(SemanticIndexJobHandler::HANDLER_ID, new SemanticIndexJobHandler($this->logger));
-            $api->registerSessionStartHook(new SemanticIndexStartupHook($api, $settings));
-        }
+        $hybrid = $query->usesLibrarian();
 
         $api->registerExtensionAgentJobHandler(
             ObserveBoundaryTerminalHook::HANDLER_ID,
@@ -118,7 +115,7 @@ final class ObservationalMemoryExtension implements ConfigurableExtensionInterfa
 
         $api->registerTool(new ToolRegistrationDTO(
             name: 'memory_search',
-            description: ($hybrid ? 'Find prior work across sessions using hybrid BM25 keyword and semantic vector search. partial: true means the index is still catching up and newer memories may be missing.' : 'Find prior work across sessions by one contiguous literal substring. Not semantic search, regex, or wildcard syntax.')
+            description: ($hybrid ? 'Find prior work across sessions using project-scoped hybrid keyword and semantic search through Librarian. partial: true means the index is still catching up and newer memories may be missing.' : 'Find prior work across sessions by one contiguous literal substring. Not semantic search, regex, or wildcard syntax.')
                 .' Searches retained memory content, not raw transcript events.',
             parametersJsonSchema: [
                 'type' => 'object',
@@ -149,6 +146,7 @@ final class ObservationalMemoryExtension implements ConfigurableExtensionInterfa
                 ],
             ],
             handler: new SearchToolHandler($query),
+            mainOnly: true,
             promptSummary: 'memory_search query [after] [before] [limit=20] — search retained memories across sessions',
             promptGuidelines: [
                 'Use memory_search when prior work, conversations, PRs, issues, or unfinished tasks may already exist, even if the user does not explicitly ask to search memory.',
@@ -161,8 +159,8 @@ final class ObservationalMemoryExtension implements ConfigurableExtensionInterfa
 
         $api->registerTool(new ToolRegistrationDTO(
             name: 'recall',
-            // Faithful Pi port (recall-observation.ts): session-global + 12..64 prefix adaptations + optional cross-session session_id.
-            description: 'Recover exact evidence and source context for one selected memory, not the whole session. Not semantic search or transcript browsing.',
+            // Both local and external recall resolve IDs across the selected project.
+            description: 'Recover exact evidence and source context for one selected memory across this project; the matched memory determines its source session. Ambiguous IDs return full IDs and memory content for a full-ID retry. Not semantic search or transcript browsing.',
             parametersJsonSchema: [
                 'type' => 'object',
                 'additionalProperties' => false,
@@ -173,15 +171,11 @@ final class ObservationalMemoryExtension implements ConfigurableExtensionInterfa
                         'pattern' => '^[a-f0-9]{12,64}$',
                         'description' => 'Full lowercase hex observation or reflection id, or a unique 12–64 character prefix from compacted memory, /om-view, memory_search, or a previous recall result. Not a topic search.',
                     ],
-                    'session_id' => [
-                        'type' => 'string',
-                        'minLength' => 1,
-                        'description' => 'Originating session_id from memory_search for prior-session hits. Omit to recall from the current session.',
-                    ],
                 ],
             ],
             handler: new RecallToolHandler($query),
-            promptSummary: 'recall id [session_id] — retrieve source context for a selected memory',
+            mainOnly: true,
+            promptSummary: 'recall id — retrieve source context for a selected memory',
             promptGuidelines: [
                 'Use recall for exact wording, rationale, file paths, commands, errors, commits, user constraints, or provenance behind a remembered claim.',
                 'Use recall when the user asks why you believe something, what supports a memory, or what was decided earlier.',
@@ -208,7 +202,7 @@ final class ObservationalMemoryExtension implements ConfigurableExtensionInterfa
             return;
         }
 
-        $poller = new OmBackgroundStatusPoller($context, $databasePath, $this->logger);
+        $poller = new OmBackgroundStatusPoller($context, $databasePath, $this->logger, $this->api);
         $context->onTick(static function () use ($poller): void {
             $poller->tick();
         });

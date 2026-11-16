@@ -10,7 +10,6 @@ use Ineersa\Hatfield\ExtensionApi\ExtensionApiInterface;
 use Ineersa\HatfieldExt\ObservationalMemory\Runtime\OmActivityReporter;
 use Ineersa\HatfieldExt\ObservationalMemory\Runtime\OmPaths;
 use Ineersa\HatfieldExt\ObservationalMemory\Runtime\OmSettings;
-use Ineersa\HatfieldExt\ObservationalMemory\Semantic\SemanticIndexJobHandler;
 use Ineersa\HatfieldExt\ObservationalMemory\Storage\MemoryGenerationRepository;
 use Ineersa\HatfieldExt\ObservationalMemory\Storage\ObservationRepository;
 use Ineersa\HatfieldExt\ObservationalMemory\Storage\OmDatabaseFactory;
@@ -33,8 +32,12 @@ final readonly class ObserveBoundaryJobHandler implements ExtensionAgentJobHandl
 
     public function handle(ExtensionApiInterface $api, array $payload, ?string $jobId, ?string $correlationId): void
     {
-        $settings = OmSettings::fromApi($api);
         $runId = (string) ($payload['run_id'] ?? '');
+        // Recheck at execution: old/explicitly queued child jobs must also be inert.
+        if ('' !== $runId && $api->isChildRun($runId)) {
+            return;
+        }
+        $settings = OmSettings::fromApi($api);
         $terminalEndSeq = (int) ($payload['terminal_end_seq'] ?? 0);
         $terminalStatus = (string) ($payload['terminal_status'] ?? '');
         if ('' === $runId || $terminalEndSeq < 1 || '' === $terminalStatus) {
@@ -82,7 +85,6 @@ final readonly class ObserveBoundaryJobHandler implements ExtensionAgentJobHandl
                 $activity->clear($runId, $activityJobId);
             }
         }
-        SemanticIndexJobHandler::schedule($api, $settings, $runId);
     }
 
     private function maybeDispatchThresholdReflection(

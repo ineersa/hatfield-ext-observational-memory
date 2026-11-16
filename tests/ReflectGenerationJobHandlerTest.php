@@ -53,6 +53,19 @@ final class ReflectGenerationJobHandlerTest extends IsolatedKernelTestCase
         parent::tearDown();
     }
 
+    public function testExplicitlySelectedChildJobsDoNoWork(): void
+    {
+        foreach (['subagent-run', 'fork-run'] as $runId) {
+            $api = $this->createMock(ExtensionApiInterface::class);
+            $api->expects($this->once())->method('isChildRun')->with($runId)->willReturn(true);
+            foreach (['getSettings', 'getCwd', 'sessionEvents', 'agent', 'dispatchExtensionAgentJob'] as $capability) {
+                $api->expects($this->never())->method($capability);
+            }
+
+            (new ReflectGenerationJobHandler(new NullLogger()))->handle($api, ['run_id' => $runId], 'queued-job', $runId);
+        }
+    }
+
     public function testThresholdNoopWhenUnderTokenGate(): void
     {
         $settings = OmSettings::fromArray([
@@ -324,23 +337,6 @@ final class ReflectGenerationJobHandlerTest extends IsolatedKernelTestCase
             throw new \RuntimeException('unexpected tool '.$tool->name);
         });
 
-        $semanticApi = $this->createMock(ExtensionApiInterface::class);
-        $semanticApi->method('getCwd')->willReturn($api->getCwd());
-        $semanticApi->method('getSettings')->willReturn($api->getSettings('observational_memory') + [
-            'semantic' => ['embedding_api' => ['base_url' => 'http://embed.test/v1', 'model_id' => 'embed']],
-        ]);
-        $semanticApi->method('agent')->willReturn($api->agent());
-        $semanticApi->expects($this->exactly(2))->method('dispatchExtensionAgentJob')->willReturnCallback(function (ExtensionAgentJobRequestDTO $job) use ($paths, $generationId): void {
-            self::assertSame('observational_memory.semantic_index', $job->handlerId);
-            $committed = $this->omDatabaseFactory()->connect($paths->databasePath);
-            try {
-                self::assertSame($generationId, $committed->fetchOne("SELECT generation_id FROM om_active_generation WHERE run_id = 'run-r'"));
-                self::assertSame(2, (int) $committed->fetchOne('SELECT COUNT(*) FROM om_reflection'));
-            } finally {
-                $committed->close();
-            }
-        });
-        $api = $semanticApi;
         $handler = new ReflectGenerationJobHandler(new NullLogger());
         $payload = [
             'run_id' => 'run-r',
@@ -630,7 +626,9 @@ final class ReflectGenerationJobHandlerTest extends IsolatedKernelTestCase
             public function getSettings(string $key): array
             {
                 if ('observational_memory' !== $key) {
-                    return [];
+                    return [
+                        // Retrieval availability must never gate local model work or canonical persistence.
+                        'librarian' => ['url' => 'http://unavailable.invalid/_mcp'], ];
                 }
 
                 return [
@@ -659,6 +657,11 @@ final class ReflectGenerationJobHandlerTest extends IsolatedKernelTestCase
             public function exec(): ExecInterface
             {
                 throw new \LogicException('unused');
+            }
+
+            public function isChildRun(string $runId): bool
+            {
+                return false;
             }
 
             public function agent(): AgentRunnerInterface
